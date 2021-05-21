@@ -1,0 +1,147 @@
+%import common (NUMBER, WS_INLINE)
+
+%ignore WS_INLINE
+%declare _INDENT _DEDENT
+%ignore /#[^\n]*\n?/
+%ignore /\s*((\/\*.*?(?<!\\)(\\\\)*?\*\/)|(###.*?(?<!\\)(\\\\)*?###))[ \t]*/s
+
+?start:  [program_decl] [main]
+program_decl: (declaration|stmt_import|_NL|raw_ffi)+
+?declaration: function_declaration
+            | variable_declaration
+            | constant_declaration
+            | macro_declaration  // XXX: Remove?
+            | class_declaration
+            // | ffi_function_definition
+function_declaration: "def" IDENTIFIER [_LEFT_ANGLED _list{type} _RIGHT_ANGLED] _LEFT_PAREN [fdec_args] _RIGHT_PAREN code_block{_func_code}
+class_declaration: "class" IDENTIFIER [_LEFT_ANGLED _paren{_list{_inherit_from}}] code_block{_class_code}
+variable_declaration: "var" _list{_variable_decl_thing}
+constant_declaration: "const" _list{_variable_decl_thing}
+macro_declaration: "macro" _list{_variable_decl_thing}  // XXX: Remove?
+// ffi_function_definition: "ffi" "def"
+_variable_decl_thing: IDENTIFIER [":" type] "=" value
+_class_variable_decl_thing: IDENTIFIER [":" type][ "=" value]
+?class_data_decl: [_SCOPE] "var" _list{_class_variable_decl_thing} -> class_var_decl
+                | [_SCOPE] "const" _list{_class_variable_decl_thing} -> class_const_decl
+
+_func_code: (codes | stmt_return)
+_class_code: (class_data_decl | method_decl | raw_ffi)
+_inherit_from: [_SCOPE] _namespace_or_identifier
+method_decl: [_SCOPE] ("def" IDENTIFIER [_LEFT_ANGLED _list{type} _RIGHT_ANGLED] _LEFT_PAREN [fdec_args] _RIGHT_PAREN code_block{_func_code})
+main: "main" code_block{codes}
+stmt_return: "return" _sep{value, _E_COMMA}
+
+?action: (assign | control_flow | throw | value | delete) //| stmt_import // TODO: make value not an action. Also, ban operator overloading
+?assign: value  "=" value -> normal_assign
+       | value "+=" value -> plus_assign
+       | value "-=" value -> minus_assign
+       | value "*=" value -> mul_assign
+       | value "/=" value -> div_assign
+       | value "%=" value -> mod_assign
+       | value "^=" value -> pow_assign
+throw: "throw" value  // TODO: "ohno"
+delete: "delete" value  // TODO: yeet
+slice: value [":" value [":" value]]
+?loops: for_loop | while_loop
+?control_flow: loops | conditions
+for_loop: "for" IDENTIFIER "in" value code_block{codes}
+while_loop: "while" value code_block{codes}
+?conditions: ifs | unless
+ifs: "if" value code_block{codes} ("elif" value code_block{codes})* ["else" code_block{codes}]
+switch_case: "switch" value ":" _NL _INDENT (case _NL*)+ [default _NL*] _DEDENT
+case: "case" _list{value} code_block{_sc_codes}
+default: "default" code_block{codes}
+_sc_codes: (declaration | action | stmt_return | fallthrough )
+fallthrough: "fallthrough" _NL?
+unless: "unless" value code_block{codes}
+
+
+arg: [IDENTIFIER "="] value
+args: _list{arg}
+
+gen_type: type _LEFT_ANGLED _list{type} _RIGHT_ANGLED
+?type: gen_type | ref_type | _namespace_or_identifier
+ref_type: "&" type
+
+fdec_arg: ["*"|"**"] IDENTIFIER [":" type] ["=" value] // TODO: Limit *args and **kwargs?
+fdec_args: _list{fdec_arg}
+
+?stmt_import: normal_import | from_import | ffi_import
+normal_import: "import" import_list
+?import_list: _paren{_list{IMPORTABLE}}
+IMPORTABLE: (STRING|/\.*[_a-zA-Z][_a-zA-Z0-9]*(\.[_a-zA-Z][_a-zA-Z0-9]*)*/)
+from_import: "from" IMPORTABLE "import" IDENTIFIER
+ffi_import: "ffi" "include" _paren{_list{IMPORTABLE}}
+?value: value _LEFT_PAREN [args] _RIGHT_PAREN   -> call_op  // TODO ADD LIST COMPREHENSIONS
+      | value _LEFT_BRACE slice _RIGHT_BRACE    -> index_op
+      | value ":=" value -> walrus_assign
+      | "new" value -> new_stmt  // TODO: Make more memey
+      | logic_ops
+?logic_ops: exp
+          | value "==" strong_exp   -> eq
+?exp: strong_exp  // Lower in precedence
+    | value "+" strong_exp   -> add
+    | value "-" strong_exp   -> sub
+    | value "<<" strong_exp   -> lshift
+    | value ">>" strong_exp   -> rshift
+    | value _E_DOT strong_exp -> namespacing
+
+
+?strong_exp: raw_value
+    | strong_exp "::" raw_value -> static_namespacing
+    | strong_exp "*" raw_value  -> mul
+    | strong_exp "/" raw_value  -> div
+    | strong_exp "%" raw_value  -> mod
+    | strong_exp "^" raw_value  -> pow
+
+?raw_value: IDENTIFIER
+      | NUMBER
+      | MULTILINE_STR
+      | STRING
+      | "true" -> const_true
+      | "false" -> const_false
+      | "null" -> const_null
+      | unary
+      | _LEFT_PAREN value _RIGHT_PAREN -> paren
+      | switch_case
+      | _LEFT_PAREN "def" [_LEFT_ANGLED _list{type} _RIGHT_ANGLED] _LEFT_PAREN [fdec_args] _RIGHT_PAREN _LEFT_CURLY _func_code _RIGHT_CURLY _RIGHT_PAREN -> anonymous_function
+      // | fstring // TODO
+
+?unary: "-" value -> unary_neg
+      | "+" value -> unary_plus
+      | "~" value -> unary_not
+
+namespacing: static_namespacing _E_DOT IDENTIFIER
+static_namespacing: static_namespacing "::" IDENTIFIER
+// // wordy:
+_namespace_or_identifier: IDENTIFIER
+                        | static_namespacing
+                        | namespacing
+_SCOPE: "public"|"private"|"protected"
+
+STRING: /(("(?!"").*?(?<!\\)(\\\\)*?"|'(?!'').*?(?<!\\)(\\\\)*?'))/
+IDENTIFIER: /[_a-zA-Z][_a-zA-Z0-9]*/
+MULTILINE_STR: /((""".*?(?<!\\)(\\\\)*?""")|('''.*?(?<!\\)(\\\\)*?'''))/s
+// namespacable: /[_a-zA-Z][_a-zA-Z0-9]*(\.[_a-zA-Z][_a-zA-Z0-9]*)+/
+?codes: (declaration | action | stmt_import | raw_ffi)
+raw_ffi: DEFAULT_BACKEND
+DEFAULT_BACKEND: /```.*?(?<!\\)(\\\\)*?```/s
+code_block{x}: ":" _NL _INDENT (x _NL*)+ _DEDENT
+// code_block{x}: "{" x+ "}"
+_paren{x}: (x) | (_LEFT_PAREN x _RIGHT_PAREN)
+_sep{x, sep}: x (sep x)*
+_hanging_sep{x, sep}: x (sep x)* sep?
+_list{x}: _hanging_sep{x, _E_COMMA}
+_NL: /((\r?\n)+[\t ]*(#[^\n]*)?)+/
+_E_COMMA: /\s*,\s*/
+_E_DOT: /((\.\s*)|(\s*\.))/
+_E_EQ: /\s*=\s*/
+// For the indenter
+_LEFT_PAREN:  "("// /\s*\(\s*/  # For when we do custom
+_RIGHT_PAREN: ")"// /\s*\)\s*/  # For when we do custom
+_LEFT_BRACE:  "["// /\s*\[\s*/  # For when we do custom
+_RIGHT_BRACE: "]"// /\s*\[\s*/  # For when we do custom
+_LEFT_ANGLED:  /\s*<\s*/  // Special!
+_RIGHT_ANGLED: /\s*>\s*/  // Special!
+_LEFT_CURLY: "{"// /\s*{\s*/  # For when we do custom
+_RIGHT_CURLY: "}"// /\s*}\s*/  # For when we do custom
