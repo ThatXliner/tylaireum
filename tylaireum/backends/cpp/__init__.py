@@ -11,7 +11,7 @@ import lark
 from lark import Transformer
 
 from tylaireum import parser
-from tylaireum.api.backends import utils
+from tylaireum.backends import utils
 
 env = jinja2.Environment(
     loader=jinja2.FileSystemLoader(str(Path(__file__).parent.joinpath("templates"))),

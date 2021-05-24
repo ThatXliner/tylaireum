@@ -2,7 +2,7 @@ import textwrap
 
 from lark import Transformer
 
-from tylaireum.api.backends import utils
+from tylaireum.backends import utils
 
 
 class MainTransformer(Transformer):
