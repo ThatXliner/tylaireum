@@ -1,6 +1,6 @@
 import textwrap
 
-from tylaireum.api.backends import cpp
+from tylaireum.backends import cpp
 
 
 class TestCPP:

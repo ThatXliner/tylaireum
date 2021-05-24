@@ -11,7 +11,7 @@ import re
 import black
 
 from tylaireum import parser
-from tylaireum.api.backends.cpp import ast
+from tylaireum.backends.cpp import ast
 
 DOC = """
 import math, io
